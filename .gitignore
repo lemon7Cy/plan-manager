@@ -1,0 +1,29 @@
+# Local editor / OS state
+.DS_Store
+.idea/
+.vscode/
+xcuserdata/
+*.xcuserstate
+
+# Build products and SwiftPM cache
+.build/
+.swiftpm/
+DerivedData/
+build/
+*.xcresult/
+*.app/
+*.ipa
+*.dSYM/
+
+# Local credentials, signing material, data and backups
+.env
+.env.*
+!.env.example
+*.p12
+*.mobileprovision
+*.key
+*.pem
+*.sqlite*
+*.store*
+PlanManager-Backup-*.json
+*.gguf

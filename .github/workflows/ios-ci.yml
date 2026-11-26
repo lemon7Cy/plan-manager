@@ -1,0 +1,76 @@
+name: Native iOS Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Install XcodeGen
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+      - name: Validate version and generate project
+        run: |
+          scripts/bump_plan_manager_version.sh --check
+          xcodegen generate --spec 'Plan Manager/project.yml'
+          scripts/bump_plan_manager_version.sh --check
+      - name: Test fitness core
+        run: swift test --package-path 'Plan Manager' --scratch-path "$RUNNER_TEMP/fitness-core"
+      - name: Select an available iPhone simulator
+        id: simulator
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          devices = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '-j']))['devices']
+          for runtime in sorted(devices, reverse=True):
+              if '.iOS-' not in runtime:
+                  continue
+              for device in devices[runtime]:
+                  if device['name'].startswith('iPhone'):
+                      with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                          output.write(f"id={device['udid']}\n")
+                      raise SystemExit(0)
+          raise SystemExit('No available iPhone simulator runtime')
+          PY
+      - name: Run iOS tests
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+        run: |
+          xcodebuild -project 'Plan Manager/Plan Manager.xcodeproj' \
+            -scheme 'Plan Manager' -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -parallel-testing-enabled NO \
+            -derivedDataPath "$RUNNER_TEMP/ios-test-build" \
+            -resultBundlePath "$RUNNER_TEMP/FitnessTests.xcresult" \
+            CODE_SIGNING_ALLOWED=NO test
+      - name: Build iPhone release target
+        run: |
+          xcodebuild -project 'Plan Manager/Plan Manager.xcodeproj' \
+            -scheme 'Plan Manager' -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/ios-release-build" \
+            CODE_SIGNING_ALLOWED=NO build
+      - name: Upload failure diagnostics
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: ios-test-results
+          path: ${{ runner.temp }}/FitnessTests.xcresult
+          if-no-files-found: ignore
+          retention-days: 7
